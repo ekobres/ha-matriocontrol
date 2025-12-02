@@ -17,7 +17,7 @@ from .matrio_controller import MatrioController
 _LOGGER = logging.getLogger(__name__)
 
 # Placeholder for "None" option in child entity mapping UI
-NONE_PLACEHOLDER_VALUE = "__NONE_UNMAPPED__"
+NONE_PLACEHOLDER_VALUE = "_MATRIO_NONE_UNMAPPED_"
 NONE_PLACEHOLDER_DISPLAY = "None (Unmapped)"
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -60,8 +60,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             await controller.connect()
             await controller.disconnect()
-        except OSError as ex:
+        except (ConnectionError, TimeoutError) as ex:
             _LOGGER.error("Failed to connect to Matrio device: %s", ex)
+            errors["base"] = "cannot_connect"
+        except OSError as ex:
+            _LOGGER.error("Network or system error connecting to Matrio device: %s", ex)
             errors["base"] = "cannot_connect"
 
         if not errors:

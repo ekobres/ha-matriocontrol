@@ -80,7 +80,6 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
         
         # Initialize state change tracking attributes
         self._child_entity_unsubscribers = []  # Unsubscribe functions for child entity state change listeners
-        self._last_child_entity_id = None
         self._ha_started_listener = None  # Listener for homeassistant_started event
     
     def _get_child_entity_id(self) -> str | None:
@@ -592,7 +591,8 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
         self._update_supported_features()
         
         # Listen for homeassistant_started event to update features after all integrations load
-        async def on_homeassistant_started(event):
+        @callback
+        def on_homeassistant_started(event):
             """Handle homeassistant_started event to update features after all integrations load."""
             if self._current_child_entity_id:
                 old_features = self._attr_supported_features
@@ -617,7 +617,7 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
         self._child_entity_unsubscribers.clear()
         
         # Clean up homeassistant_started event listener if it exists
-        if hasattr(self, '_ha_started_listener') and self._ha_started_listener:
+        if self._ha_started_listener:
             self._ha_started_listener()
         
         await super().async_will_remove_from_hass()
