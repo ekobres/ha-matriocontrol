@@ -701,11 +701,6 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
             # Child entity didn't change but features might have - update them
             self._update_supported_features()
         
-        # Force state update if child entity mapping changed
-        if new_child_entity_id != getattr(self, '_last_child_entity_id', None):
-            self.async_write_ha_state()
-            self._last_child_entity_id = new_child_entity_id
-        
         super()._async_coordinator_updated()
     
     def _update_child_entity_listener(self):

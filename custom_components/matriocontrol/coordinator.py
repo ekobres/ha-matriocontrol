@@ -67,6 +67,7 @@ class MatrioControlDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("No connection, attempting to connect")
                 # Use the new async connect method with state callback
                 def state_callback(zones):
+                    """Handle state updates from controller broadcast messages."""
                     _LOGGER.debug("State callback received %d zones", len(zones))
                     # Update entities directly for immediate state changes
                     self._update_entities_from_zones(zones)

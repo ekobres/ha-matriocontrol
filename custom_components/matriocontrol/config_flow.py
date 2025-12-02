@@ -7,7 +7,6 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.components.media_player import DOMAIN as MEDIA_PLAYER_DOMAIN
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv, entity_registry as er
@@ -16,6 +15,10 @@ from .const import DEFAULT_PORT, DEFAULT_ZONES, DOMAIN, CONF_DEVICE_NAME, CONF_Z
 from .matrio_controller import MatrioController
 
 _LOGGER = logging.getLogger(__name__)
+
+# Placeholder for "None" option in child entity mapping UI
+NONE_PLACEHOLDER_VALUE = "__NONE_UNMAPPED__"
+NONE_PLACEHOLDER_DISPLAY = "None (Unmapped)"
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -34,13 +37,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    def __init__(self):
-        """Initialize config flow."""
-
     @staticmethod
     def async_get_options_flow(config_entry):
         """Return the options flow."""
-        return OptionsFlow(config_entry)
+        return OptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -78,9 +78,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for Matrio Control."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -94,21 +91,27 @@ class OptionsFlow(config_entries.OptionsFlow):
                 if (entity.domain == "media_player" and 
                     entity.platform != DOMAIN and  # Exclude our own entities
                     not entity.disabled_by):
-                    # Get friendly name from entity registry or use entity_id
-                    name = entity.name or entity.entity_id
+                    # Get friendly name from current state, fallback to entity registry, then entity_id
+                    state = self.hass.states.get(entity.entity_id)
+                    if state and state.attributes.get("friendly_name"):
+                        name = state.attributes["friendly_name"]
+                    elif entity.name:
+                        name = entity.name
+                    else:
+                        name = entity.entity_id
+                    
                     media_players.append((entity.entity_id, name))
             
             # Sort by friendly name for better UX
             media_players.sort(key=lambda x: x[1])
             
             # Add "None" option for unmapped zones using explicit placeholder
-            NONE_PLACEHOLDER = "__NONE_UNMAPPED__"
-            media_player_options = [(NONE_PLACEHOLDER, "None (unmapped)")] + media_players
+            media_player_options = [(NONE_PLACEHOLDER_VALUE, NONE_PLACEHOLDER_DISPLAY)] + media_players
             media_player_dict = dict(media_player_options)
             
             # Debug: Log the media player options
             _LOGGER.debug("Media player options: %s", media_player_options[:5])  # First 5 options
-            _LOGGER.debug("None placeholder in media_player_dict: %s", NONE_PLACEHOLDER in media_player_dict)
+            _LOGGER.debug("None placeholder in media_player_dict: %s", NONE_PLACEHOLDER_VALUE in media_player_dict)
             
             # Get current child entity mappings
             current_mappings = self.config_entry.data.get(CONF_CHILD_ENTITY_MAPPINGS, {})
@@ -138,15 +141,15 @@ class OptionsFlow(config_entries.OptionsFlow):
                 for zone_num in range(1, num_zones + 1):
                     input_key = f"input_{zone_num}"
                     # Use placeholder for unmapped inputs, actual entity for mapped ones
-                    current_value = current_mappings.get(input_key, NONE_PLACEHOLDER)
+                    current_value = current_mappings.get(input_key, NONE_PLACEHOLDER_VALUE)
                     # Use actual device input name for display
                     input_display_name = input_names.get(input_key, f"Input {zone_num}")
                     
                     # Create a descriptive field name that Home Assistant will use as the label
                     descriptive_key = f"{input_display_name} (Input {zone_num})"
-                    # Use vol.In with the media_player_dict which includes the placeholder
+                    # Use vol.In with the media_player_dict which maps values to display names
                     schema_dict[vol.Optional(descriptive_key, default=current_value)] = vol.In(
-                        list(media_player_dict.keys())
+                        media_player_dict
                     )
                 
                 data_schema = vol.Schema(schema_dict)
@@ -201,15 +204,12 @@ class OptionsFlow(config_entries.OptionsFlow):
         
         _LOGGER.debug("Expected inputs: %s", [desc_key for desc_key, _ in all_expected_inputs])
         
-        # Define the placeholder value used in schema
-        NONE_PLACEHOLDER = "__NONE_UNMAPPED__"
-        
         # Process all expected inputs, whether they appear in user_input or not
         for descriptive_key, input_key in all_expected_inputs:
-            value = user_input.get(descriptive_key, NONE_PLACEHOLDER)  # Default to placeholder if not in user_input
+            value = user_input.get(descriptive_key, NONE_PLACEHOLDER_VALUE)  # Default to placeholder if not in user_input
             _LOGGER.debug("Processing key: %s, value: %s", descriptive_key, value)
             
-            if value and value != NONE_PLACEHOLDER:  # Valid entity mapping
+            if value and value != NONE_PLACEHOLDER_VALUE:  # Valid entity mapping
                 child_mappings[input_key] = value
                 _LOGGER.debug("Mapped %s -> %s: %s", descriptive_key, input_key, value)
             else:  # Placeholder value means explicitly unmapped
@@ -248,6 +248,10 @@ class OptionsFlow(config_entries.OptionsFlow):
             # Restore the update listeners
             self.config_entry.update_listeners.extend(old_listeners)
             _LOGGER.debug("Config entry updated without triggering reload")
+            
+            # Manually refresh the coordinator to update entities with new mappings
+            await coordinator.async_request_refresh()
+            _LOGGER.debug("Coordinator refreshed to apply new child entity mappings")
             
         except (KeyError, AttributeError) as e:
             _LOGGER.warning("Could not update coordinator or config entry: %s", e)
