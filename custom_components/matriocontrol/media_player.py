@@ -13,7 +13,7 @@ from homeassistant.components.media_player import (
     MediaType,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.core import HomeAssistant, callback, Event, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
@@ -75,8 +75,8 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
         self._base_features = base_features
         self._attr_supported_features = self._base_features
         
-        # Initialize child entity tracking (but defer feature update until hass is available)
-        self._current_child_entity_id = self._get_child_entity_id()
+        # Initialize child entity tracking (deferred until hass is available)
+        self._current_child_entity_id = None
         
         # Initialize state change tracking attributes
         self._child_entity_unsubscribers = []  # Unsubscribe functions for child entity state change listeners
@@ -115,7 +115,7 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
         zone_states = self.coordinator.data.get(ZONE_STATES_KEY, {})
         return zone_states.get(self.zone_id)
 
-    def _get_child_entity(self):
+    def _get_child_entity(self) -> State | None:
         """Get the child media player entity object."""
         child_entity_id = self._get_child_entity_id()
         if child_entity_id and self.hass:
@@ -177,7 +177,7 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
             _LOGGER.debug("Zone %d no child entity or unavailable, using base features=0x%x", 
                          self.zone_id, self._base_features)
     
-    def _handle_auto_power_management(self, changed_entity_id: str, old_state, new_state) -> None:
+    def _handle_auto_power_management(self, changed_entity_id: str, old_state: State | None, new_state: State | None) -> None:
         """Handle auto-power management when mapped child entity starts playing."""
         if not (old_state and new_state):
             return
@@ -197,7 +197,7 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
                     # Only power on - input selection is already correct
                     self.hass.async_create_task(self.async_turn_on())
 
-    def _handle_child_feature_updates(self, old_state, new_state) -> bool:
+    def _handle_child_feature_updates(self, old_state: State | None, new_state: State | None) -> bool:
         """Handle child entity feature changes and availability changes.
         
         Returns True if state update was handled internally, False if caller should update.
@@ -505,130 +505,74 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
         else:
             _LOGGER.warning("Zone %d: no input found for source '%s'", self.zone_id, source)
 
+    async def _delegate_to_child(self, service_name: str, action_description: str, **service_data) -> bool:
+        """Delegate a service call to the child entity with common error handling.
+        
+        Args:
+            service_name: The media_player service to call (e.g., 'media_play', 'shuffle_set')
+            action_description: Human-readable description for logging (e.g., 'play', 'set shuffle')
+            **service_data: Additional service data (merged with entity_id)
+            
+        Returns:
+            True if the service was called successfully, False if no child entity or error occurred.
+        """
+        child_entity_id = self._get_child_entity_id()
+        if not child_entity_id:
+            return False
+            
+        try:
+            service_data["entity_id"] = child_entity_id
+            await self.hass.services.async_call("media_player", service_name, service_data)
+            return True
+        except HomeAssistantError as err:
+            _LOGGER.warning("Zone %d failed to %s on child entity %s: %s", 
+                          self.zone_id, action_description, child_entity_id, err)
+            return False
+
     async def async_media_play(self) -> None:
         """Send play command to child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "media_play", {"entity_id": child_entity_id}
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to send play command to child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("media_play", "play")
     
     async def async_media_pause(self) -> None:
         """Send pause command to child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "media_pause", {"entity_id": child_entity_id}
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to send pause command to child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("media_pause", "pause")
     
     async def async_media_stop(self) -> None:
         """Send stop command to child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "media_stop", {"entity_id": child_entity_id}
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to send stop command to child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("media_stop", "stop")
     
     async def async_media_previous_track(self) -> None:
         """Send previous track command to child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "media_previous_track", {"entity_id": child_entity_id}
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to send previous track command to child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("media_previous_track", "skip to previous track")
     
     async def async_media_next_track(self) -> None:
         """Send next track command to child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "media_next_track", {"entity_id": child_entity_id}
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to send next track command to child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("media_next_track", "skip to next track")
     
     async def async_media_seek(self, position: float) -> None:
         """Send seek command to child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "media_seek", {
-                        "entity_id": child_entity_id,
-                        "seek_position": position
-                    }
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to send seek command to child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("media_seek", "seek", seek_position=position)
 
     async def async_set_shuffle(self, shuffle: bool) -> None:
         """Set shuffle mode on child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "shuffle_set", {
-                        "entity_id": child_entity_id,
-                        "shuffle": shuffle
-                    }
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to set shuffle on child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("shuffle_set", "set shuffle", shuffle=shuffle)
 
     async def async_set_repeat(self, repeat: str) -> None:
         """Set repeat mode on child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "repeat_set", {
-                        "entity_id": child_entity_id,
-                        "repeat": repeat
-                    }
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to set repeat on child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
+        await self._delegate_to_child("repeat_set", "set repeat", repeat=repeat)
     
     async def async_play_media(
         self, media_type: MediaType | str, media_id: str, **kwargs: Any
     ) -> None:
         """Play a piece of media via child entity."""
-        child_entity_id = self._get_child_entity_id()
-        if child_entity_id:
-            try:
-                await self.hass.services.async_call(
-                    "media_player", "play_media", {
-                        "entity_id": child_entity_id,
-                        "media_content_type": media_type,
-                        "media_content_id": media_id,
-                        **kwargs
-                    }
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Zone %d failed to play media on child entity %s: %s", 
-                              self.zone_id, child_entity_id, err)
-        else:
+        success = await self._delegate_to_child(
+            "play_media", 
+            "play media",
+            media_content_type=media_type,
+            media_content_id=media_id,
+            **kwargs
+        )
+        if not success and not self._get_child_entity_id():
             # No child entity mapped - cannot play media
             # This maintains Music Assistant compatibility while providing clear feedback
             _LOGGER.warning("Zone %d cannot play media: no child entity mapped to current input", 
@@ -637,6 +581,9 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to hass."""
         await super().async_added_to_hass()
+        
+        # Initialize child entity tracking now that hass is available
+        self._current_child_entity_id = self._get_child_entity_id()
         
         # Set up listener for child entity changes
         self._update_child_entity_listener()
@@ -689,17 +636,14 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
             # Update state tracking for the new child entity
             self._update_child_entity_listener()
             
-            # Update supported features based on new child entity
-            self._update_supported_features()
-            
             _LOGGER.info("Zone %d child entity changed from %s to %s", 
                          self.zone_id, old_child_entity_id, new_child_entity_id)
             
             # Force immediate state update when child entity changes
             self.async_write_ha_state()
-        else:
-            # Child entity didn't change but features might have - update them
-            self._update_supported_features()
+        
+        # Update supported features (always needed as features might change)
+        self._update_supported_features()
         
         super()._async_coordinator_updated()
     
@@ -727,18 +671,34 @@ class MatrioControlMediaPlayer(MatrioControlEntity, MediaPlayerEntity):
         
         # Set up new listeners first, then atomically swap to prevent coverage gaps
         new_unsubscribers = []
-        for entity_id in entities_to_track:
-            unsub = async_track_state_change_event(
-                self.hass, entity_id, self._child_entity_changed
-            )
-            new_unsubscribers.append(unsub)
-        
-        # Atomically replace old listeners with new ones
         old_unsubscribers = self._child_entity_unsubscribers
-        self._child_entity_unsubscribers = new_unsubscribers
         
-        # Clean up old listeners after new ones are active
+        try:
+            for entity_id in entities_to_track:
+                unsub = async_track_state_change_event(
+                    self.hass, entity_id, self._child_entity_changed
+                )
+                new_unsubscribers.append(unsub)
+            
+            # Atomically replace old listeners with new ones (only if all new listeners succeeded)
+            self._child_entity_unsubscribers = new_unsubscribers
+            
+        except Exception as e:
+            # If setting up new listeners failed, clean up any partial listeners we created
+            _LOGGER.warning("Failed to set up child entity listeners for zone %d: %s", self.zone_id, e)
+            for unsub in new_unsubscribers:
+                try:
+                    unsub()
+                except Exception:
+                    pass  # Ignore cleanup errors
+            # Keep old listeners active since new setup failed
+            return
+        
+        # Clean up old listeners only after new ones are successfully active
         for unsub in old_unsubscribers:
-            unsub()
+            try:
+                unsub()
+            except Exception:
+                pass  # Ignore cleanup errors for old listeners
     
 

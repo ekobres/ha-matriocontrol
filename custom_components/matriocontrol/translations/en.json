@@ -27,7 +27,10 @@
       }
     },
     "error": {
-      "update_failed": "Failed to update child entity mappings. Please try again."
+      "update_failed": "Failed to update child entity mappings. Please try again.",
+      "coordinator_unavailable": "The Matrio Control integration is not properly loaded. Please reload the integration and try again.",
+      "coordinator_data_error": "Invalid data from Matrio Control device. Please check device connection and reload the integration.",
+      "schema_error": "Unable to create options form. Please check that media player entities are available and try again."
     }
   }
 }

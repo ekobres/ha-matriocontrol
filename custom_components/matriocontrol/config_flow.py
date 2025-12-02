@@ -120,7 +120,14 @@ class OptionsFlow(config_entries.OptionsFlow):
             input_names = {}
             try:
                 coordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]
-                if coordinator and coordinator.data:
+                if not coordinator:
+                    _LOGGER.error("Coordinator not found for config entry %s", self.config_entry.entry_id)
+                    return self.async_show_form(
+                        step_id="init",
+                        errors={"base": "coordinator_unavailable"}
+                    )
+                    
+                if coordinator.data:
                     names_data = coordinator.data.get("inputs", {})
                     if names_data:
                         # Convert from {1: "name1", 2: "name2"} to {"input_1": "name1", "input_2": "name2"}
@@ -128,10 +135,20 @@ class OptionsFlow(config_entries.OptionsFlow):
                     _LOGGER.debug("Retrieved input names: %s", input_names)
                 else:
                     _LOGGER.warning("Coordinator data not available, using fallback input names")
+                    
             except KeyError as e:
-                _LOGGER.error("Coordinator not found in hass.data: %s", e)
+                _LOGGER.error("Coordinator not found in hass.data for domain %s, entry %s: %s", 
+                            DOMAIN, self.config_entry.entry_id, e)
+                return self.async_show_form(
+                    step_id="init",
+                    errors={"base": "coordinator_unavailable"}
+                )
             except (AttributeError, TypeError) as e:
-                _LOGGER.error("Error getting input names from coordinator: %s", e)
+                _LOGGER.error("Invalid coordinator data structure: %s", e)
+                return self.async_show_form(
+                    step_id="init", 
+                    errors={"base": "coordinator_data_error"}
+                )
             
             # Create schema with dynamic field names
             num_zones = self.config_entry.data.get(CONF_ZONES, DEFAULT_ZONES)
