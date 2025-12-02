@@ -22,7 +22,7 @@
     "step": {
       "init": {
         "title": "Configure Child Entity Mappings", 
-        "description": "Map each input to a child media player entity for streaming and media control. This allows zones to delegate play/pause, media info, and browsing to other media players while retaining direct volume/mute control. Leave unmapped for basic receiver functionality.\n\nConfigured zones: {zones}",
+        "description": "Map each input to a child media player entity for streaming and media control. This allows zones to delegate play/pause, and media info to other media players while retaining direct volume/mute control. Leave unmapped for basic receiver functionality.\n\nConfigured zones: {zones}",
         "data": {}
       }
     },
